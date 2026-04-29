@@ -16,6 +16,10 @@ operatingSystem:
       - nvidia-compute-G06
       - nvidia-gl-G06
       - nvidia-container-toolkit
+  provisioning:
+    installation:
+      combustion:
+        deployment: /eib/combustion/script
 
 kubernetes:
   version: v1.31.1+k3s1

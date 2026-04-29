@@ -2,3 +2,4 @@
 _build/
 eib-cache/
 .env
+secrets/
