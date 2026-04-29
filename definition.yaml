@@ -1,0 +1,24 @@
+apiVersion: 1.3
+image:
+  imageType: iso
+  arch: x86_64
+  baseImage: SL-Micro.x86_64-6.1-Base-SelfInstall-GM.install.iso
+  outputImageName: edge-nvidia-k3s.iso
+
+operatingSystem:
+  packages:
+    # Note: Requires SCC registration for official SUSE NVIDIA packages
+    additionalRepos:
+      - name: nvidia-container-toolkit
+        url: https://nvidia.github.io/libnvidia-container/stable/rpm/$basearch/nvidia-container-toolkit.repo
+    additionalPackages:
+      - nvidia-open-driver-G06-signed-kmp-default
+      - nvidia-compute-G06
+      - nvidia-gl-G06
+      - nvidia-container-toolkit
+
+kubernetes:
+  version: v1.31.1+k3s1
+  manifests:
+    - /eib/kubernetes/manifests/nvidia-runtime-class.yaml
+    - /eib/kubernetes/manifests/nvidia-device-plugin.yaml
