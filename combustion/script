@@ -1,18 +1,4 @@
 #!/bin/bash
-# combustion: network
-
-# The registration code is provided via a local file that is NOT committed to git.
-# This ensures the subscription is handled "INTERNAL-USE-ONLY" and securely.
-
-REG_FILE="/eib/secrets/scc-registration-code"
-
-if [ -f "$REG_FILE" ]; then
-    REG_CODE=$(cat "$REG_FILE")
-    echo "Registering system with SCC..."
-    SUSEConnect -r "$REG_CODE"
-else
-    echo "Warning: SCC Registration code not found at $REG_FILE. Skipping registration."
-fi
-
-# Additional post-install logic can go here (e.g., enabling GPU services)
-systemctl enable --now nvidia-container-toolkit
+# SCC registration is handled by EIB at build time via sccRegistrationCode.
+# NVIDIA container runtime is configured via os-files/containerd config.toml.tmpl.
+# No custom first-boot actions required.
