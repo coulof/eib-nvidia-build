@@ -1,0 +1,96 @@
+version: '3'
+
+vars:
+  EIB_IMAGE: registry.suse.com/edge/3.5/edge-image-builder:1.3.3
+  DEFINITION_TMPL: definition.yaml.tmpl
+  DEFINITION_FILE: _definition-resolved.yaml
+  SCC_FILE: "{{.ROOT_DIR}}/secrets/scc-registration-code"
+  ARCH: x86_64
+  OUTPUT_TYPE: iso
+  OUTPUT_NAME: combustion-test.iso
+  CONTAINER_ENGINE:
+    sh: |
+      if [ -n "${CONTAINER_ENGINE}" ]; then
+        echo "${CONTAINER_ENGINE}"
+      elif command -v podman > /dev/null 2>&1; then
+        echo "podman"
+      elif command -v docker > /dev/null 2>&1; then
+        echo "docker"
+      else
+        echo "ERROR: neither podman nor docker found" >&2; exit 1
+      fi
+
+tasks:
+  _resolve-def:
+    internal: true
+    cmds:
+      - |
+        if [ ! -f "{{.SCC_FILE}}" ]; then
+          echo "ERROR: {{.SCC_FILE}} not found — add your SCC registration code there" >&2
+          exit 1
+        fi
+        SCC_REG_CODE=$(cat "{{.SCC_FILE}}") envsubst '${SCC_REG_CODE}' \
+          < "{{.ROOT_DIR}}/{{.DEFINITION_TMPL}}" \
+          > "{{.ROOT_DIR}}/{{.DEFINITION_FILE}}"
+
+  validate:
+    desc: Validate the image definition for errors
+    deps: [_resolve-def]
+    cmds:
+      - >
+        {{.CONTAINER_ENGINE}} run --rm -i
+        -v "{{.ROOT_DIR}}":/eib
+        {{.EIB_IMAGE}}
+        validate --definition-file {{.DEFINITION_FILE}}
+
+  build:
+    desc: Build the EIB image (requires SCC credentials and --privileged)
+    deps: [_resolve-def]
+    cmds:
+      - >
+        {{.CONTAINER_ENGINE}} run --rm -i --privileged
+        -v "{{.ROOT_DIR}}":/eib
+        {{.EIB_IMAGE}}
+        build --definition-file {{.DEFINITION_FILE}}
+
+  logs:
+    desc: Show all logs from the most recent build, oldest file first
+    vars:
+      LAST_BUILD:
+        sh: ls -td "{{.ROOT_DIR}}/_build/build-"*/ 2>/dev/null | head -1
+    cmds:
+      - |
+        if [ -z "{{.LAST_BUILD}}" ]; then
+          echo "No build logs found."
+          exit 0
+        fi
+        echo "=== Build directory: {{.LAST_BUILD}} ==="
+        while IFS= read -r log; do
+          echo ""
+          echo "--- $(basename "$log") ---"
+          cat "$log"
+        done < <(find "{{.LAST_BUILD}}" -maxdepth 1 -name "*.log" -printf "%T@ %p\n" | sort -n | cut -d' ' -f2-)
+
+  clean:
+    desc: Remove EIB build and validation output directories
+    prompt: This will delete _build/, _validation/, and _definition-resolved.yaml. Continue?
+    cmds:
+      - >
+        {{.CONTAINER_ENGINE}} run --rm -i
+        --entrypoint sh
+        -v "{{.ROOT_DIR}}":/eib
+        {{.EIB_IMAGE}}
+        -c "rm -rf /eib/_build/ /eib/_validation/ /eib/_definition-resolved.yaml"
+
+  generate:
+    desc: Generate a combustion test drive ISO
+    deps: [_resolve-def]
+    cmds:
+      - >
+        {{.CONTAINER_ENGINE}} run --rm -i --privileged
+        -v "{{.ROOT_DIR}}":/eib
+        {{.EIB_IMAGE}}
+        generate --definition-file {{.DEFINITION_FILE}}
+        --arch {{.ARCH}}
+        --output-type {{.OUTPUT_TYPE}}
+        --output {{.OUTPUT_NAME}}

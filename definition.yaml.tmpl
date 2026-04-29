@@ -1,0 +1,32 @@
+apiVersion: 1.3
+image:
+  imageType: iso
+  arch: x86_64
+  baseImage: SL-Micro.x86_64-6.2-Base-SelfInstall-GM.install.iso
+  outputImageName: edge-nvidia-k3s-slmicro62.iso
+
+operatingSystem:
+  packages:
+    sccRegistrationCode: ${SCC_REG_CODE}
+    additionalRepos:
+      - url: https://download.nvidia.com/suse/sle15sp6/
+      - url: https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo
+    packageList:
+      - nvidia-open-driver-G06-signed-kmp-default
+      - nvidia-compute-utils-G06
+      - nvidia-gl-G06
+      - nvidia-container-toolkit
+
+kubernetes:
+  version: v1.31.1+k3s1
+  helm:
+    charts:
+      - name: nvidia-device-plugin
+        version: v0.14.5
+        repositoryName: nvidia
+        targetNamespace: nvidia-device-plugin
+        createNamespace: true
+        valuesFile: nvidia-device-plugin.yaml
+    repositories:
+      - name: nvidia
+        url: https://nvidia.github.io/k8s-device-plugin

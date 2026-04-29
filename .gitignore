@@ -1,5 +1,7 @@
 *.iso
 _build/
+_validation/
 eib-cache/
 .env
 secrets/
+_definition-resolved.yaml
