@@ -29,6 +29,7 @@ podman run --rm -it --privileged `
 - **SCC Credentials:** Subscription keys are handled via `secrets/scc-registration-code` (Git-ignored). **DO NOT** commit your key.
 
 ## 📚 References
+- [Official SUSE Edge Image Builder Repository](https://github.com/suse-edge/edge-image-builder)
 - [Official Docs: NVIDIA GPUs on SUSE Linux Micro (SUSE Edge 3.5)](https://documentation.suse.com/suse-edge/3.5/html/edge/id-nvidia-gpus-on-suse-linux-micro.html)
 
 ## 🦎 AIcko's Arch Note
