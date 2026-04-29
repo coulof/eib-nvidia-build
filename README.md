@@ -63,6 +63,7 @@ podman run --rm -i --privileged \
 - `kubernetes/helm/values/nvidia-device-plugin.yaml`: Helm values for the NVIDIA device plugin chart.
 - `kubernetes/manifests/nvidia-runtime-class.yaml`: RuntimeClass enabling pods to request the NVIDIA runtime.
 - `combustion/`: First-boot script (enables nvidia-container-toolkit service).
+- `rpms/gpg-keys/`: Pinned GPG keys for package repos (NVIDIA container toolkit, Rancher/K3s).
 - `secrets/`: Git-ignored directory for the SCC registration code.
 
 ## 🔒 Privacy & Safety
