@@ -1,6 +1,7 @@
 *.iso
 _build/
 _validation/
+_network-builds/
 eib-cache/
 .env
 secrets/

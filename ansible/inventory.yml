@@ -1,0 +1,15 @@
+all:
+  vars:
+    # HTTP URL where generated node ISOs are served (must be reachable from BMC)
+    iso_http_base: http://192.168.0.100:8080
+
+  hosts:
+    node01:
+      bmc_ip: 192.168.0.10
+      bmc_user: admin
+      bmc_password: "{{ lookup('file', playbook_dir + '/../secrets/bmc-node01') }}"
+
+    node02:
+      bmc_ip: 192.168.0.11
+      bmc_user: admin
+      bmc_password: "{{ lookup('file', playbook_dir + '/../secrets/bmc-node02') }}"
