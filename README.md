@@ -23,6 +23,8 @@ task clean      # Remove _build/ and _validation/ output
 
 ### Manual Commands
 
+> The EIB image version in the commands below must match `EIB_IMAGE` in `Taskfile.yml`.
+
 The Taskfile injects `secrets/scc-registration-code` into `definition.yaml.tmpl` to produce `_definition-resolved.yaml` before calling EIB. To do this manually:
 
 ```bash
@@ -62,7 +64,11 @@ podman run --rm -i --privileged \
 - `kubernetes/config/server.yaml`: K3s server config (CNI, SELinux).
 - `kubernetes/helm/values/nvidia-device-plugin.yaml`: Helm values for the NVIDIA device plugin chart.
 - `kubernetes/manifests/nvidia-runtime-class.yaml`: RuntimeClass enabling pods to request the NVIDIA runtime.
-- `combustion/`: First-boot script (enables nvidia-container-toolkit service).
+- `combustion/`: First-boot stub — SCC and NVIDIA packages are handled at build time by EIB; no first-boot actions required.
+- `templates/`: Source templates for per-node network combustion ISOs (`nmconnection.tmpl`, `script.tmpl`, `definition-network.yaml`).
+- `nodes/`: Per-node `.env` files (hostname, IP, MAC, gateway, DNS).
+- `scripts/generate-node.sh`: Renders templates and invokes EIB to produce a per-node network ISO.
+- `ansible/`: Redfish playbook for injecting per-node ISOs via BMC virtual media.
 - `rpms/gpg-keys/`: Pinned GPG keys for package repos (NVIDIA container toolkit, Rancher/K3s).
 - `secrets/`: Git-ignored directory for the SCC registration code.
 
@@ -73,6 +79,3 @@ podman run --rm -i --privileged \
 - [Official SUSE Edge Image Builder Repository](https://github.com/suse-edge/edge-image-builder)
 - [Official Docs: NVIDIA GPUs on SUSE Linux Micro (SUSE Edge 3.5)](https://documentation.suse.com/suse-edge/3.5/html/edge/id-nvidia-gpus-on-suse-linux-micro.html)
 - [Fuel Ignition](https://opensuse.github.io/fuel-ignition/) — web UI for generating Ignition/Combustion configs
-
-## 🦎 AIcko's Arch Note
-Updated for **SL Micro 6.2**. This build ensures the NVIDIA runtime is baked into the immutable OS layer, providing consistent GPU availability across reboots.

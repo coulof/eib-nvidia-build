@@ -96,34 +96,6 @@ tasks:
         --output {{.OUTPUT_NAME}}
 
   generate-node:
-    desc: Generate a per-node network combustion ISO (usage: task generate-node -- <node>)
-    vars:
-      NODE: '{{.CLI_ARGS}}'
+    desc: "Generate a per-node network combustion ISO (usage: task generate-node -- <node>)"
     cmds:
-      - |
-        if [ -z "{{.NODE}}" ]; then
-          echo "Usage: task generate-node -- <node-name>" >&2; exit 1
-        fi
-        ENV_FILE="{{.ROOT_DIR}}/nodes/{{.NODE}}.env"
-        if [ ! -f "$ENV_FILE" ]; then
-          echo "ERROR: $ENV_FILE not found" >&2; exit 1
-        fi
-
-        set -a; source "$ENV_FILE"; set +a
-
-        WORKDIR="{{.ROOT_DIR}}/_network-builds/{{.NODE}}"
-        mkdir -p "$WORKDIR/network" "$WORKDIR/combustion"
-
-        envsubst < "{{.ROOT_DIR}}/network/nmconnection.tmpl" \
-          > "$WORKDIR/network/${NODE_INTERFACE:-eth0}.nmconnection"
-        envsubst < "{{.ROOT_DIR}}/network/script.tmpl" \
-          > "$WORKDIR/combustion/script"
-        cp "{{.ROOT_DIR}}/network/definition-network.yaml" "$WORKDIR/"
-
-        {{.CONTAINER_ENGINE}} run --rm -i --privileged \
-          -v "$WORKDIR":/eib \
-          {{.EIB_IMAGE}} \
-          generate --definition-file definition-network.yaml \
-          --arch x86_64 --output-type iso --output {{.NODE}}-network.iso
-
-        echo "Generated: _network-builds/{{.NODE}}/{{.NODE}}-network.iso"
+      - bash "{{.ROOT_DIR}}/scripts/generate-node.sh" "{{.CLI_ARGS}}" "{{.ROOT_DIR}}" "{{.CONTAINER_ENGINE}}" "{{.EIB_IMAGE}}"
