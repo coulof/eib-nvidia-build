@@ -1,24 +1,21 @@
-# ADR-001: Scalable Network Configuration Injection for SUSE Edge
+# ADR-001: Network Configuration Injection for SUSE Edge at Scale
 
 **Status:** Accepted
-**Date:** 2026-04-29
+**Date:** 2026-04-30
 **Deciders:** Lead Architect, Infrastructure Engineering Team
 
 ---
 
 ## Context
 
-Deploying SUSE Edge at scale requires a Zero-Touch or Low-Touch provisioning model. A "chicken
-and egg" problem arises when nodes boot without a DHCP server and require static network
-configuration (IPs, Bonds, VLANs) to reach the management plane (Rancher/Fleet). EIB can bake
-configurations into the image, but doing so creates tight coupling between the OS artifact and
-physical hardware (MAC addresses), complicating hardware replacement (RMA) and mass deployment.
+Deploying SUSE Edge nodes at scale requires a way to deliver per-node network
+configuration (static IPs, hostnames) to immutable SL Micro 6.2 images without
+baking node-specific data into the image itself. The constraints:
 
-The constraints we are designing for:
-
-- **No DHCP** on the target network — nodes must have static IPs from first boot
-- **BMC (iLO/iDRAC) available** on all nodes via an out-of-band management network
-- **Fleet scale** — hardware replacement and multi-site deployment must not require OS image rebuilds
+- **No DHCP** on the target network — nodes must come up with static IPs from first boot
+- **BMC (iLO/iDRAC) reachable** on a separate management network
+- **Fleet scale** — hardware replacement (RMA) and multi-site deployment must not
+  require image rebuilds
 
 ---
 
@@ -26,114 +23,142 @@ The constraints we are designing for:
 
 ### Option A: Monolithic Multi-Profile Image (EIB MAC-match)
 
+A single EIB image embedding per-MAC NetworkManager profiles for the whole fleet.
+
 | Dimension | Assessment |
 |---|---|
 | Complexity | Low (single build) |
 | Scalability | Medium (image size grows with node count) |
-| Hardware dependency | **High** (bound to specific MACs) |
+| Hardware dependency | High (bound to specific MACs) |
 | Maintenance | High (RMA requires image rebuild) |
 
-**Pros:** No external infrastructure. Simple field procedure.
-**Cons:** Brittle — replacing a NIC breaks automation. Exposes the full cluster network topology inside the ISO.
+**Rejected** — brittle, leaks topology into the image, unworkable across sites.
 
----
+### Option B: Ansible + Redfish per-node combustion ISO injection
 
-### Option B: Metal3 / Ironic (SUSE Edge native provisioning)
-
-Metal3 is the SUSE Edge-recommended bare-metal provisioning stack. It uses Redfish under the hood
-and provides a Kubernetes-native declarative API (BareMetalHost CRDs) with full lifecycle state
-management. It is the correct long-term architecture for fleet-scale provisioning.
-
-| Dimension | Assessment |
-|---|---|
-| Complexity | High (management cluster + Ironic + BMO + CAPM3 + MetalLB) |
-| Scalability | **Maximum** — declarative, self-healing, Cluster API native |
-| Hardware dependency | None |
-| GitOps fit | Excellent |
-| SUSE alignment | Native |
-
-**Pros:** Full node lifecycle management; GitOps-ready; hardware-agnostic; Cluster API integration.
-
-**Why we cannot adopt it today — two hard blockers:**
-
-**Blocker 1 — Combustion label mismatch with Ironic config drive.**
-Metal3/Ironic creates a config drive partition on the root disk, labeled **`config-2`** (OpenStack
-format), containing user data at `/openstack/latest/user_data`. SL Micro's **combustion** looks
-for a block device labeled **`COMBUSTION`** — it will never find the `config-2` partition. **Ignition**,
-on the other hand, does recognise the OpenStack config drive format and would work. SL Micro
-supports both combustion and ignition, but EIB images use combustion by default. Switching to
-ignition-based first-boot would unblock Metal3, but requires changes to how EIB builds are
-configured.
-
-A `DataImage` CRD exists that can attach a non-bootable ISO as a second virtual media mount —
-however it only activates **after** provisioning completes and requires a reboot, making it
-unsuitable for first-boot network configuration.
-*(Source: `metal3-docs/design/baremetal-operator/host-config-drive.md`,
-`metal3-docs/docs/user-guide/src/bmo/instance_customization.md`,
-`metal3-docs/design/baremetal-operator/bmh_non-bootable_iso.md`)*
-
-**Blocker 2 — Resolved by SUSE Edge `preprovisioningNetworkDataName` + nmstate.**
-SUSE Edge Metal3 documents a DHCP-less provisioning path using `preprovisioningNetworkDataName`
-referencing a Kubernetes Secret in **nmstate format**. When Redfish virtual media boot is used,
-Ironic embeds this nmstate config into the IPA boot ISO; the IPA ramdisk applies it before
-contacting Ironic, eliminating the DHCP requirement entirely. The same Secret is referenced by
-`spec.networkData` to write `/mnt/openstack/latest/network_data.json` on the config drive for
-the deployed OS. **Blocker 2 is therefore resolved for environments using SUSE Edge Metal3 with
-Redfish virtual media.**
-*(Source: https://documentation.suse.com/suse-edge/3.5/html/edge/quickstart-metal3.html#id-configuring-static-ips)*
-
-**Blocker 1 therefore remains the only open blocker:** EIB images must be switched from
-combustion to ignition before Metal3 can be adopted.
-
----
-
-### Option C: Automated Virtual Media Injection via Ansible + Redfish ✅ Adopted
-
-The BMC is reachable on the out-of-band management network. Redfish supports mounting **multiple**
-virtual media devices simultaneously. This is leveraged to deliver two ISOs:
-
-| Virtual media | Content | Consumed by |
-|---|---|---|
-| Main EIB ISO | SL Micro + K3s + NVIDIA stack | OS installer |
-| Per-node combustion ISO | NMConnection file + hostname script | SL Micro combustion at first boot |
-
-The OS boots from the main ISO; combustion detects the `COMBUSTION`-labeled block device (the
-second mounted ISO), reads the network config and hostname script, applies them before any service
-attempts to reach the network, then ejects the combustion drive.
+A second virtual-media ISO per node containing only the NMConnection + hostname,
+mounted via Redfish and consumed by combustion.
 
 | Dimension | Assessment |
 |---|---|
 | Complexity | Medium (BMC + Ansible) |
-| Scalability | High (inventory-driven, no image rebuild per node) |
-| Hardware dependency | Low (generic OS image; config lives in inventory) |
-| Maintenance | Low (RMA = update inventory, re-run `task deploy`) |
-| DHCP requirement | **None** — delivered entirely out-of-band via BMC |
+| Scalability | Medium (inventory-driven, but imperative) |
+| GitOps fit | Poor — no reconciliation, no node-state machine |
+| SUSE alignment | Partial — uses Redfish but bypasses the SUSE-recommended stack |
 
-**Pros:** Works in zero-DHCP environments; OS image stays generic and immutable; uses existing BMC
-infrastructure; Jinja2 templates + Ansible inventory are the single source of truth.
+**Rejected** — works for a single cluster but does not integrate with Cluster API,
+has no node-state visibility, and requires a manual ISO HTTP server. Code for this
+option lived under `templates/`, `ansible/playbooks/generate-and-inject.yml`, and
+`task deploy`; all removed in favour of Option C.
 
-**Cons:** Imperative, no self-healing reconciliation. Does not integrate with Cluster API.
+### Option C: Metal3 / Ironic with EIB `custom/scripts/` (Adopted)
+
+SUSE Edge ships Metal3 as the native bare-metal provisioning stack. EIB builds a
+generic, hardware-agnostic raw image; per-node config is delivered through Metal3
+(Ironic) at provisioning time.
+
+| Dimension | Assessment |
+|---|---|
+| Complexity | High — requires management cluster (RKE2 + Rancher + MetalLB + Ironic + BMO + CAPM3) |
+| Scalability | Maximum — declarative, self-healing, Cluster API native |
+| Hardware dependency | None |
+| GitOps fit | Excellent — BareMetalHost CRDs in git, Fleet-compatible |
+| SUSE alignment | Native — the documented production path |
 
 ---
 
 ## Decision
 
-Adopt **Option C** (Ansible + Redfish dual virtual media) as the provisioning mechanism.
+Adopt **Option C (Metal3)**. EIB produces one generic raw image; per-node config
+flows through `BareMetalHost` Secrets and is applied at first boot by an
+EIB-bundled script.
 
-Option B (Metal3) is the correct target architecture. The transition should be triggered when:
+---
 
-- DHCP is available on the provisioning network **and** a compatible IPA image is available
-  (from SUSE Edge or built in-house), **or**
-- SL Micro EIB images are reconfigured to use ignition instead of combustion for first-boot config
+## Architecture
+
+The end-to-end flow combines four moving parts. Understanding each is necessary
+before reading the implementation files.
+
+### 1. EIB image (`task build`)
+
+EIB produces a single raw image (`SL-Micro.x86_64-6.2-Base-GM.raw` →
+`edge-nvidia-k3s-slmicro62.raw`) containing:
+
+- SL Micro 6.2 with K3s + NVIDIA stack baked in
+- Kernel argument **`ignition.platform.id=openstack`** — mandatory; without it
+  SL Micro will not consume cloud-init/openstack metadata from the config drive
+- `custom/scripts/01-fix-growfs.sh` — grows root FS to full disk size
+- `custom/scripts/02-configure-network.sh` — applies per-node network config
+  from `config-2` (see step 4)
+
+EIB auto-bundles `custom/scripts/*` into the combustion archive and runs them
+at first boot in numeric order.
+
+### 2. Metal3 provisioning (`task register-nodes`)
+
+For each node, the Ansible playbook creates three Kubernetes objects in the
+management cluster:
+
+| Object | Content | Purpose |
+|---|---|---|
+| `<node>-bmc-credentials` Secret | username/password | Used by Ironic to talk Redfish |
+| `<node>-networkdata` Secret | nmstate YAML (interface, IP, routes, DNS) | Static IP for IPA ramdisk + deployed OS |
+| `<node>` BareMetalHost CR | references both Secrets, points at the EIB image URL | Triggers Ironic |
+
+Ironic then:
+1. Mounts the IPA boot ISO via Redfish virtual media
+2. Applies the `preprovisioningNetworkDataName` nmstate during inspection (DHCP-less)
+3. Writes the EIB raw image to disk
+4. Writes a `config-2`-labeled partition containing `meta_data.json` (with the
+   `metal3-name` field) and `network_data.json` (nmstate from the same Secret,
+   referenced via `spec.networkData`)
+5. Reboots the node into the deployed OS
+
+### 3. First boot — combustion runs `custom/scripts/`
+
+Combustion runs `01-fix-growfs.sh`, then `02-configure-network.sh`. The script:
+
+1. Looks for a partition with label `config-2`. If none, exits 0.
+2. Mounts it read-only.
+3. Reads `metal3-name` from `meta_data.json` → writes `/etc/hostname`.
+4. Copies `network_data.json` to `/tmp/nmc/desired/_all.yaml`.
+5. Runs `nmc generate` + `nmc apply` — translates nmstate into NetworkManager
+   connection files and activates them.
+
+After combustion completes, K3s starts with a configured network and correct hostname.
+
+### 4. Why both `preprovisioningNetworkDataName` AND `networkData`?
+
+These cover two different boot phases:
+
+| BareMetalHost field | Consumed by | Phase |
+|---|---|---|
+| `preprovisioningNetworkDataName` | IPA ramdisk (Ironic Python Agent) | Inspection / provisioning |
+| `networkData` | Written to `config-2` on the deployed disk by Ironic | Deployed OS first boot |
+
+Both reference the **same Secret** (`<node>-networkdata`).
+
+**Note on SUSE Edge's "networkData not supported" wording.** The SUSE Edge 3.5
+quickstart-metal3 documentation states that "the IPAM resources and
+`Metal3DataTemplate` networkData fields are not currently supported." This refers
+specifically to the **IPAM-templated** networkData (auto-populated by the IPAM
+controller from a pool). A **manually-set `BareMetalHost.spec.networkData`
+Secret reference** is not in the explicit-support list, but is the only Ironic
+mechanism documented for placing `network_data.json` onto the deployed OS's
+`config-2` partition — and SUSE's own example `configure-network.sh` script
+relies on that file existing. We therefore set it manually and treat it as
+working until SUSE's docs say otherwise.
 
 ---
 
 ## Consequences
 
-- **Easier:** Hardware replacement — update `ansible/inventory.yml`, re-run `task deploy`
-- **Harder:** No automatic reconciliation; no Cluster API integration
-- **Deferred:** Full lifecycle management, GitOps provisioning, IPAM — all pending Metal3 adoption
-- **Revisit trigger:** DHCP available on provisioning network + SUSE Edge ships a DHCP-less IPA
+- **Easier:** Hardware replacement — update `BareMetalHost` CR + Secret; Metal3 reprovisions
+- **Easier:** Node lifecycle visibility via `kubectl get baremetalhosts`
+- **Easier:** GitOps via Fleet — CRDs in git, applied declaratively
+- **Harder:** Requires a management cluster (RKE2 + Rancher + MetalLB + Ironic + BMO + CAPM3) before any node can be provisioned
+- **Unchanged:** EIB image build (`task build`), NVIDIA stack, K3s configuration
 
 ---
 
@@ -141,18 +166,25 @@ Option B (Metal3) is the correct target architecture. The transition should be t
 
 | Artifact | Role |
 |---|---|
-| `definition.yaml.tmpl` | Generic EIB OS image — no node-specific network config baked in |
-| `templates/nmconnection.j2` | Jinja2 → NMConnection static IP config (combustion ISO content) |
-| `templates/combustion-script.j2` | Jinja2 → hostname script (combustion ISO content) |
-| `templates/definition-network.yaml` | Minimal EIB definition for `generate` (combustion ISO only) |
-| `ansible/inventory.yml` | Single source of truth for all node variables |
-| `ansible/playbooks/generate-and-inject.yml` | Renders templates, generates combustion ISO via EIB, injects both ISOs via Redfish, boots node |
-| `task deploy [-- node]` | Taskfile entry point |
+| `definition.yaml.tmpl` | EIB raw image — `imageType: raw`, `kernelArgs: [ignition.platform.id=openstack]` |
+| `custom/scripts/01-fix-growfs.sh` | Grows root FS on first boot |
+| `custom/scripts/02-configure-network.sh` | Mounts config-2, applies nmstate via `nmc`, sets hostname |
+| `metal3/baremetalhost.j2` | BareMetalHost CR — references both `preprovisioningNetworkDataName` and `networkData` |
+| `metal3/networkdata-secret.j2` | nmstate Secret — single source for IPA + deployed OS |
+| `ansible/inventory.yml` | Per-node variables (BMC, IP, MAC, hostname) |
+| `ansible/playbooks/register-nodes.yml` | Creates BMC creds Secret, networkdata Secret, BareMetalHost CR |
+| `task register-nodes [-- node]` | Taskfile entry point |
+
+---
 
 ## Action Items
 
-1. [x] Generic EIB image — no per-node network profiles
-2. [x] Ansible playbook using `community.general.redfish_command` for dual virtual media injection
-3. [x] Per-node config managed exclusively through `ansible/inventory.yml`
-4. [ ] Revisit Metal3 when DHCP is available on provisioning network or SUSE Edge ships a DHCP-less IPA
-5. [ ] Evaluate switching EIB build from combustion to ignition — this would unlock full Metal3 compatibility and eliminate per-node ISO lifecycle entirely (config becomes a Kubernetes Secret)
+1. [x] Generic EIB image — no per-node profiles baked in
+2. [x] `custom/scripts/01-fix-growfs.sh`
+3. [x] `custom/scripts/02-configure-network.sh`
+4. [x] `metal3/baremetalhost.j2` references both networkData fields
+5. [x] `ansible/playbooks/register-nodes.yml`
+6. [ ] Verify `nmc` binary is present in the SL Micro 6.2 base image, or bundle it via EIB (`packageList` or `custom/files/`). SUSE's reference script invokes `./nmc` from CWD; ours assumes `nmc` is on `$PATH`.
+7. [ ] Download `SL-Micro.x86_64-6.2-Base-GM.raw` to `base-images/` (only the SelfInstall ISOs are present today)
+8. [ ] Deploy management cluster (RKE2 + Rancher + MetalLB + Ironic + BMO + CAPM3) — out of scope for this repo
+9. [ ] First end-to-end provisioning test — confirm that `network_data.json` lands on the deployed OS's `config-2` and that `02-configure-network.sh` consumes it correctly

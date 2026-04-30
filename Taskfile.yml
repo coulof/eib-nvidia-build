@@ -95,15 +95,6 @@ tasks:
         --output-type {{.OUTPUT_TYPE}}
         --output {{.OUTPUT_NAME}}
 
-  deploy:
-    desc: "[LEGACY] Generate and inject per-node combustion ISOs via Ansible/Redfish (usage: task deploy -- [node])"
-    cmds:
-      - |
-        LIMIT=""
-        [ -n "{{.CLI_ARGS}}" ] && LIMIT="--limit {{.CLI_ARGS}}"
-        ansible-playbook -i "{{.ROOT_DIR}}/ansible/inventory.yml" \
-          "{{.ROOT_DIR}}/ansible/playbooks/generate-and-inject.yml" $LIMIT
-
   register-nodes:
     desc: "Register nodes with Metal3 — creates BareMetalHost CRs and userData Secrets (usage: task register-nodes -- [node])"
     cmds:

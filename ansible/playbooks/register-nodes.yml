@@ -1,18 +1,23 @@
 ---
-# Registers bare-metal nodes with Metal3 by creating:
-#   - A BMC credentials Secret
-#   - A networkData Secret (nmstate — static IP for both IPA provisioning phase and deployed OS)
-#   - A userData Secret (ignition — hostname only; network is handled by networkData)
-#   - A BareMetalHost CR
+# Registers bare-metal nodes with Metal3 by creating, per node:
+#   - <node>-bmc-credentials Secret  — Redfish auth for Ironic
+#   - <node>-networkdata Secret      — nmstate; consumed by both
+#                                      preprovisioningNetworkDataName (IPA ramdisk)
+#                                      and spec.networkData (deployed OS config-2)
+#   - <node> BareMetalHost CR        — triggers Ironic provisioning
+#
+# Hostname is delivered via meta_data.json on config-2 (Ironic populates it from
+# the BMH name) and applied by custom/scripts/02-configure-network.sh at first
+# boot. No userData ignition needed.
 #
 # Prerequisites:
 #   - Management cluster running (RKE2 + Rancher + MetalLB + Ironic + BMO + CAPM3)
-#   - KUBECONFIG pointing at the management cluster
+#   - KUBECONFIG points at the management cluster
 #   - ansible-galaxy collection install -r ansible/requirements.yml
 #   - eib_image_http_url and eib_image_checksum set in inventory
-#   - EIB image built as imageType: raw with ignition (not combustion)
+#   - EIB raw image hosted and reachable from Ironic
 #
-# Ref: https://documentation.suse.com/suse-edge/3.5/html/edge/quickstart-metal3.html#id-configuring-static-ips
+# Ref: https://documentation.suse.com/suse-edge/3.5/html/edge/quickstart-metal3.html
 #
 # Usage:
 #   ansible-playbook -i ansible/inventory.yml ansible/playbooks/register-nodes.yml
@@ -40,37 +45,10 @@
             password: "{{ bmc_password }}"
       delegate_to: localhost
 
-    - name: Create networkData Secret (nmstate — IPA + deployed OS static IP)
+    - name: Create networkData Secret (nmstate — IPA + deployed OS)
       kubernetes.core.k8s:
         state: present
         template: "{{ root_dir }}/metal3/networkdata-secret.j2"
-      delegate_to: localhost
-
-    - name: Create userData Secret (ignition — hostname only)
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: "{{ inventory_hostname }}-userdata"
-            namespace: "{{ metal3_namespace }}"
-          type: Opaque
-          stringData:
-            userData: |
-              {
-                "ignition": { "version": "3.3.0" },
-                "storage": {
-                  "files": [
-                    {
-                      "path": "/etc/hostname",
-                      "contents": { "source": "data:,{{ node_hostname }}" },
-                      "mode": 420,
-                      "overwrite": true
-                    }
-                  ]
-                }
-              }
       delegate_to: localhost
 
     - name: Apply BareMetalHost CR

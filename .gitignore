@@ -1,4 +1,5 @@
 *.iso
+*.raw
 _build/
 _validation/
 _network-builds/
@@ -6,3 +7,4 @@ eib-cache/
 .env
 secrets/
 _definition-resolved.yaml
+base-images/

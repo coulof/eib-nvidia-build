@@ -1,82 +1,101 @@
-# SUSE Edge Image Builder: K3s + NVIDIA (SL Micro 6.2)
+# SUSE Edge: K3s + NVIDIA GPU on SL Micro 6.2 (EIB + Metal3)
 
-This repository contains the Edge Image Builder (EIB) configuration for building a SUSE Linux Micro 6.2 image with K3s and NVIDIA GPU support.
+Edge Image Builder (EIB) configuration plus Metal3 provisioning glue for
+deploying SUSE Linux Micro 6.2 + K3s + NVIDIA GPU stack across a fleet of
+bare-metal nodes.
 
-## 🚀 Build Instructions
+The EIB image is **generic** — no per-node data baked in. Per-node static IPs,
+hostnames, and BMC details flow through Metal3 at provisioning time. See
+[`docs/ADR-001`](docs/ADR-001-network-configuration-injection.md) for the full
+architecture rationale.
 
-### Prerequisites
-- **Podman** or **Docker** installed.
-- **[Task](https://taskfile.dev/installation/)** (optional) for convenient task aliases.
-- **SUSE Customer Center (SCC) Subscription:** Required for signed NVIDIA drivers.
-- **SCC registration code** stored in `secrets/scc-registration-code` (git-ignored).
-- **Base ISO:** [Download SLE Micro 6.2](https://www.suse.com/download/sle-micro/) and place it in `base-images/`.
+## Prerequisites
 
-### With Taskfile (recommended)
+- **Podman** or **Docker**
+- **[Task](https://taskfile.dev/installation/)** for the task aliases
+- **SUSE Customer Center subscription** — registration code in
+  `secrets/scc-registration-code` (git-ignored). Required for signed NVIDIA drivers.
+- **Base image** — `SL-Micro.x86_64-6.2-Base-GM.raw` in `base-images/`
+  (download from SCC; xz-compressed, run `unxz` first).
+- **Management cluster** for the deploy step — RKE2 + Rancher + MetalLB +
+  Ironic + BMO + CAPM3. Out of scope for this repo.
+- **Ansible** + collections for `task register-nodes`:
+  ```bash
+  ansible-galaxy collection install -r ansible/requirements.yml
+  ```
 
-```bash
-task validate        # Inject SCC code and validate the definition
-task build           # Inject SCC code and build the image
-task generate        # Generate a combustion test drive
-task logs            # Tail logs from the most recent build
-task clean           # Remove _build/ and _validation/ output
-task deploy          # Generate and inject network ISOs for all nodes
-task deploy -- node01  # Generate and inject for a single node
-```
-
-### Manual Commands
-
-> The EIB image version in the commands below must match `EIB_IMAGE` in `Taskfile.yml`.
-
-The Taskfile injects `secrets/scc-registration-code` into `definition.yaml.tmpl` to produce `_definition-resolved.yaml` before calling EIB. To do this manually:
+## Build the image
 
 ```bash
-SCC_REG_CODE=$(cat secrets/scc-registration-code) \
-  envsubst '${SCC_REG_CODE}' < definition.yaml.tmpl > _definition-resolved.yaml
+task validate        # syntax-check the EIB definition
+task build           # build the raw image (--privileged required for package resolution)
+task generate        # generate a combustion test drive
+task logs            # tail logs from the most recent build
+task clean           # remove _build/, _validation/, _definition-resolved.yaml
 ```
 
-**Validate:**
+The Taskfile injects `secrets/scc-registration-code` into `definition.yaml.tmpl`
+via `envsubst` to produce `_definition-resolved.yaml` before invoking EIB. The
+SCC code never lands in `definition.yaml.tmpl` or git history.
+
+## Register nodes with Metal3
+
+With a management cluster running and `KUBECONFIG` pointing at it:
+
 ```bash
-podman run --rm -i \
-  -v "$(pwd)":/eib \
-  registry.suse.com/edge/3.5/edge-image-builder:1.3.3 \
-  validate --definition-file _definition-resolved.yaml
+task register-nodes              # all nodes in inventory
+task register-nodes -- node01    # single node
 ```
 
-**Build** (`--privileged` required for package resolution):
+For each node this creates:
+- `<node>-bmc-credentials` Secret (Redfish auth)
+- `<node>-networkdata` Secret (nmstate — IPA + deployed OS)
+- `<node>` BareMetalHost CR (triggers Ironic provisioning)
+
+Watch progress:
 ```bash
-podman run --rm -i --privileged \
-  -v "$(pwd)":/eib \
-  registry.suse.com/edge/3.5/edge-image-builder:1.3.3 \
-  build --definition-file _definition-resolved.yaml
+kubectl get baremetalhosts -n metal3-system
+kubectl get baremetalhost <node> -n metal3-system -o jsonpath='{.status.provisioning.state}'
 ```
 
-**Generate** a combustion drive for testing:
-```bash
-podman run --rm -i --privileged \
-  -v "$(pwd)":/eib \
-  registry.suse.com/edge/3.5/edge-image-builder:1.3.3 \
-  generate --definition-file _definition-resolved.yaml \
-  --arch x86_64 --output-type iso --output combustion-test.iso
+## Repo layout
+
+```
+definition.yaml.tmpl              EIB definition (raw image, ignition.platform.id=openstack kernel arg)
+custom/scripts/
+  01-fix-growfs.sh                grows root FS to full disk on first boot
+  02-configure-network.sh         mounts config-2, applies nmstate via nmc, sets hostname
+kubernetes/
+  config/server.yaml              K3s server config (CNI, SELinux)
+  helm/values/                    NVIDIA device plugin Helm values
+  manifests/                      RuntimeClass for the NVIDIA runtime
+os-files/                         containerd config.toml.tmpl with the NVIDIA runtime handler
+rpms/gpg-keys/                    pinned GPG keys (NVIDIA container toolkit, Rancher/K3s)
+metal3/
+  baremetalhost.j2                BareMetalHost CR (preprovisioningNetworkDataName + networkData)
+  networkdata-secret.j2           nmstate Secret used by both networkData fields
+ansible/
+  inventory.yml                   per-node config — single source of truth
+  playbooks/register-nodes.yml    creates Secrets + BareMetalHost CRs
+  requirements.yml                community.general + kubernetes.core
+secrets/                          git-ignored — SCC code, BMC passwords (bmc-<node>)
+docs/ADR-001-…                    architecture decision record
 ```
 
-## 📂 Structure
-- `definition.yaml.tmpl`: Main EIB configuration template — `${SCC_REG_CODE}` is substituted at build time.
-- `base-images/`: Base ISO(s) — git-ignored, must be downloaded manually.
-- `os-files/`: Containerd runtime configuration template for the NVIDIA runtime handler.
-- `kubernetes/config/server.yaml`: K3s server config (CNI, SELinux).
-- `kubernetes/helm/values/nvidia-device-plugin.yaml`: Helm values for the NVIDIA device plugin chart.
-- `kubernetes/manifests/nvidia-runtime-class.yaml`: RuntimeClass enabling pods to request the NVIDIA runtime.
-- `combustion/`: First-boot stub — SCC and NVIDIA packages are handled at build time by EIB; no first-boot actions required.
-- `templates/`: Jinja2 templates for per-node network combustion ISOs (`nmconnection.j2`, `combustion-script.j2`, `definition-network.yaml`).
-- `ansible/inventory.yml`: Node definitions — hostname, IP, MAC, BMC credentials. Single source of truth for per-node config.
-- `ansible/playbooks/generate-and-inject.yml`: Renders templates, generates per-node ISOs via EIB, and injects them via Redfish virtual media.
-- `rpms/gpg-keys/`: Pinned GPG keys for package repos (NVIDIA container toolkit, Rancher/K3s).
-- `secrets/`: Git-ignored directory for the SCC registration code.
+## First-boot flow
 
-## 🔒 Privacy & Safety
-- **SCC Credentials:** Store your key in `secrets/scc-registration-code` (git-ignored). The Taskfile injects it at build time via `envsubst` — it never touches `definition.yaml.tmpl` or git history.
+1. EIB image is written to disk by Ironic.
+2. Ironic writes `config-2` partition with `meta_data.json` (hostname) and
+   `network_data.json` (nmstate from the BMH `networkData` Secret).
+3. Combustion runs `custom/scripts/01-fix-growfs.sh` then
+   `02-configure-network.sh`. The latter mounts config-2, sets the hostname
+   from `metal3-name`, and runs `nmc generate && nmc apply` to materialize the
+   NetworkManager connections.
+4. K3s starts with the configured network and correct hostname.
 
-## 📚 References
-- [Official SUSE Edge Image Builder Repository](https://github.com/suse-edge/edge-image-builder)
-- [Official Docs: NVIDIA GPUs on SUSE Linux Micro (SUSE Edge 3.5)](https://documentation.suse.com/suse-edge/3.5/html/edge/id-nvidia-gpus-on-suse-linux-micro.html)
-- [Fuel Ignition](https://opensuse.github.io/fuel-ignition/) — web UI for generating Ignition/Combustion configs
+## References
+
+- [SUSE Edge 3.5 — Metal3 quickstart](https://documentation.suse.com/suse-edge/3.5/html/edge/quickstart-metal3.html)
+- [SUSE Edge 3.5 — NVIDIA on SL Micro](https://documentation.suse.com/suse-edge/3.5/html/edge/id-nvidia-gpus-on-suse-linux-micro.html)
+- [Edge Image Builder repo](https://github.com/suse-edge/edge-image-builder)
+- [NM Configurator (`nmc`)](https://github.com/suse-edge/nm-configurator)

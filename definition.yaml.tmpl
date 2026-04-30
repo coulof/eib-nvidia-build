@@ -1,13 +1,20 @@
 apiVersion: 1.3
 image:
-  imageType: iso
+  imageType: raw
   arch: x86_64
-  baseImage: SL-Micro.x86_64-6.2-Base-SelfInstall-GM.install.iso
-  outputImageName: edge-nvidia-k3s-slmicro62.iso
+  baseImage: SL-Micro.x86_64-6.2-Base-GM.raw
+  outputImageName: edge-nvidia-k3s-slmicro62.raw
 
 operatingSystem:
+  # Base image is ~2.7 GB; EIB needs ~900 MB headroom for K3s + NVIDIA artifacts.
+  # custom/scripts/01-fix-growfs.sh expands the rootfs to the full disk on first boot.
+  rawConfiguration:
+    diskSize: 6G
+  kernelArgs:
+    - ignition.platform.id=openstack
   users:
     - username: root
+      createHomeDir: true
       encryptedPassword: "$6$0f/reSBaR2BgvHbw$FG1Ce71qi48vIK8LdynERShcMwh0aPP37VrS2muNXQ8YUUY3DduexbCafFmN6VrHeN4xvvlsbiC9OCC2pwZOu/"
       sshKeys:
         - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEyay7snwSq9smkxPzX3FQMpfOEHfXxawh133C/+Dvi5 gonzo@psyche"

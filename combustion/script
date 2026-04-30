@@ -1,4 +1,0 @@
-#!/bin/bash
-# SCC registration is handled by EIB at build time via sccRegistrationCode.
-# NVIDIA container runtime is configured via os-files/containerd config.toml.tmpl.
-# No custom first-boot actions required.
