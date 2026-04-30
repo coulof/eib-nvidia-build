@@ -6,6 +6,10 @@ image:
   outputImageName: edge-nvidia-k3s-slmicro62.iso
 
 operatingSystem:
+  users:
+    - username: root
+      sshKeys:
+        - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEyay7snwSq9smkxPzX3FQMpfOEHfXxawh133C/+Dvi5 gonzo@psyche"
   packages:
     sccRegistrationCode: ${SCC_REG_CODE}
     additionalRepos:
