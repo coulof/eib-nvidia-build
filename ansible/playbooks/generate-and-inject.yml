@@ -1,0 +1,98 @@
+---
+# Renders per-node network config, generates a combustion ISO via EIB,
+# then injects it via Redfish virtual media and reboots the node.
+#
+# Prerequisites:
+#   - ansible-galaxy collection install -r ansible/requirements.yml
+#   - ISO HTTP server running: python3 -m http.server 8080 -d _network-builds/
+#   - BMC passwords in secrets/bmc-<node> (git-ignored)
+#
+# Usage:
+#   ansible-playbook -i ansible/inventory.yml ansible/playbooks/generate-and-inject.yml
+#   ansible-playbook -i ansible/inventory.yml ansible/playbooks/generate-and-inject.yml --limit node01
+
+- name: Generate per-node network ISO and inject via Redfish
+  hosts: all
+  gather_facts: false
+  vars:
+    root_dir: "{{ playbook_dir }}/../.."
+    workdir: "{{ root_dir }}/_network-builds/{{ inventory_hostname }}"
+
+  tasks:
+    - name: Create per-node work directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ workdir }}/network"
+        - "{{ workdir }}/combustion"
+      delegate_to: localhost
+
+    - name: Render NMConnection file
+      ansible.builtin.template:
+        src: "{{ root_dir }}/templates/nmconnection.j2"
+        dest: "{{ workdir }}/network/{{ node_interface }}.nmconnection"
+        mode: "0644"
+      delegate_to: localhost
+
+    - name: Render combustion hostname script
+      ansible.builtin.template:
+        src: "{{ root_dir }}/templates/combustion-script.j2"
+        dest: "{{ workdir }}/combustion/script"
+        mode: "0755"
+      delegate_to: localhost
+
+    - name: Copy EIB network definition
+      ansible.builtin.copy:
+        src: "{{ root_dir }}/templates/definition-network.yaml"
+        dest: "{{ workdir }}/definition-network.yaml"
+        mode: "0644"
+      delegate_to: localhost
+
+    - name: Generate per-node network ISO via EIB
+      ansible.builtin.shell: >
+        {{ container_engine }} run --rm -i --privileged
+        -v "{{ workdir }}":/eib
+        {{ eib_image }}
+        generate --definition-file definition-network.yaml
+        --arch x86_64 --output-type iso --output {{ inventory_hostname }}-network.iso
+      delegate_to: localhost
+
+    - name: Eject any existing virtual media
+      community.general.redfish_command:
+        category: Manager
+        command: VirtualMediaEject
+        baseuri: "{{ bmc_ip }}"
+        username: "{{ bmc_user }}"
+        password: "{{ bmc_password }}"
+        virtual_media_url: "{{ iso_http_base }}/{{ inventory_hostname }}/{{ inventory_hostname }}-network.iso"
+      ignore_errors: true
+
+    - name: Insert network combustion ISO as virtual media
+      community.general.redfish_command:
+        category: Manager
+        command: VirtualMediaInsert
+        baseuri: "{{ bmc_ip }}"
+        username: "{{ bmc_user }}"
+        password: "{{ bmc_password }}"
+        virtual_media_url: "{{ iso_http_base }}/{{ inventory_hostname }}/{{ inventory_hostname }}-network.iso"
+        media_types:
+          - CD
+
+    - name: Set one-time boot from virtual CD
+      community.general.redfish_command:
+        category: Systems
+        command: SetOneTimeBoot
+        baseuri: "{{ bmc_ip }}"
+        username: "{{ bmc_user }}"
+        password: "{{ bmc_password }}"
+        bootdevice: Cd
+
+    - name: Reboot node
+      community.general.redfish_command:
+        category: Systems
+        command: PowerReboot
+        baseuri: "{{ bmc_ip }}"
+        username: "{{ bmc_user }}"
+        password: "{{ bmc_password }}"

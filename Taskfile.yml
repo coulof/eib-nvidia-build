@@ -95,7 +95,11 @@ tasks:
         --output-type {{.OUTPUT_TYPE}}
         --output {{.OUTPUT_NAME}}
 
-  generate-node:
-    desc: "Generate a per-node network combustion ISO (usage: task generate-node -- <node>)"
+  deploy:
+    desc: "Generate and inject per-node network ISOs via Ansible/Redfish (usage: task deploy -- [node])"
     cmds:
-      - bash "{{.ROOT_DIR}}/scripts/generate-node.sh" "{{.CLI_ARGS}}" "{{.ROOT_DIR}}" "{{.CONTAINER_ENGINE}}" "{{.EIB_IMAGE}}"
+      - |
+        LIMIT=""
+        [ -n "{{.CLI_ARGS}}" ] && LIMIT="--limit {{.CLI_ARGS}}"
+        ansible-playbook -i "{{.ROOT_DIR}}/ansible/inventory.yml" \
+          "{{.ROOT_DIR}}/ansible/playbooks/generate-and-inject.yml" $LIMIT

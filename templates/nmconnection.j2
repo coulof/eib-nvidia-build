@@ -1,0 +1,16 @@
+[connection]
+id={{ node_interface }}
+type=ethernet
+interface-name={{ node_interface }}
+
+[ethernet]
+mac-address={{ node_mac }}
+
+[ipv4]
+method=manual
+address1={{ node_ip }}/{{ node_prefix }},{{ node_gateway }}
+dns={{ node_dns }};
+
+[ipv6]
+method=disabled
+addr-gen-mode=default

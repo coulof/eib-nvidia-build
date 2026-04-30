@@ -14,11 +14,13 @@ This repository contains the Edge Image Builder (EIB) configuration for building
 ### With Taskfile (recommended)
 
 ```bash
-task validate   # Inject SCC code and validate the definition
-task build      # Inject SCC code and build the image
-task generate   # Generate a combustion test drive
-task logs       # Tail logs from the most recent build
-task clean      # Remove _build/ and _validation/ output
+task validate        # Inject SCC code and validate the definition
+task build           # Inject SCC code and build the image
+task generate        # Generate a combustion test drive
+task logs            # Tail logs from the most recent build
+task clean           # Remove _build/ and _validation/ output
+task deploy          # Generate and inject network ISOs for all nodes
+task deploy -- node01  # Generate and inject for a single node
 ```
 
 ### Manual Commands
@@ -65,10 +67,9 @@ podman run --rm -i --privileged \
 - `kubernetes/helm/values/nvidia-device-plugin.yaml`: Helm values for the NVIDIA device plugin chart.
 - `kubernetes/manifests/nvidia-runtime-class.yaml`: RuntimeClass enabling pods to request the NVIDIA runtime.
 - `combustion/`: First-boot stub — SCC and NVIDIA packages are handled at build time by EIB; no first-boot actions required.
-- `templates/`: Source templates for per-node network combustion ISOs (`nmconnection.tmpl`, `script.tmpl`, `definition-network.yaml`).
-- `nodes/`: Per-node `.env` files (hostname, IP, MAC, gateway, DNS).
-- `scripts/generate-node.sh`: Renders templates and invokes EIB to produce a per-node network ISO.
-- `ansible/`: Redfish playbook for injecting per-node ISOs via BMC virtual media.
+- `templates/`: Jinja2 templates for per-node network combustion ISOs (`nmconnection.j2`, `combustion-script.j2`, `definition-network.yaml`).
+- `ansible/inventory.yml`: Node definitions — hostname, IP, MAC, BMC credentials. Single source of truth for per-node config.
+- `ansible/playbooks/generate-and-inject.yml`: Renders templates, generates per-node ISOs via EIB, and injects them via Redfish virtual media.
 - `rpms/gpg-keys/`: Pinned GPG keys for package repos (NVIDIA container toolkit, Rancher/K3s).
 - `secrets/`: Git-ignored directory for the SCC registration code.
 
