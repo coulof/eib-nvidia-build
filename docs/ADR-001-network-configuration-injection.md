@@ -75,5 +75,3 @@ The primary conflict is between **Simplicity (Option A)** and **Maintainability 
 1. [x] Define a standard `definition.yaml` in EIB for a **Generic OS Image** (no network profiles) → `network/definition-network.yaml`
 2. [x] Develop an Ansible Playbook using the `community.general.redfish_command` module to generate and mount transient `combustion` ISOs → `ansible/playbooks/inject-network.yml`
 3. [x] Validate the "RMA Workflow": ensure a technician can swap a server and re-run the pipeline without touching the EIB build process → update `nodes/<node>.env` and re-run `task generate-node -- <node>`
-
-🦎 AIcko
