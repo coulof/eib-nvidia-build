@@ -1,0 +1,82 @@
+---
+# Registers bare-metal nodes with Metal3 by creating:
+#   - A BMC credentials Secret
+#   - A userData Secret (ignition config: hostname + NMConnection static IP)
+#   - A BareMetalHost CR
+#
+# Prerequisites:
+#   - Management cluster running (RKE2 + Rancher + MetalLB + Ironic + BMO + CAPM3)
+#   - KUBECONFIG pointing at the management cluster
+#   - ansible-galaxy collection install -r ansible/requirements.yml
+#   - eib_image_http_url and eib_image_checksum set in inventory (or as extra-vars)
+#
+# Usage:
+#   ansible-playbook -i ansible/inventory.yml ansible/playbooks/register-nodes.yml
+#   ansible-playbook -i ansible/inventory.yml ansible/playbooks/register-nodes.yml --limit node01
+
+- name: Register nodes with Metal3
+  hosts: all
+  gather_facts: false
+  vars:
+    root_dir: "{{ playbook_dir }}/../.."
+
+  tasks:
+    - name: Render NMConnection content
+      ansible.builtin.set_fact:
+        nmconnection_content: "{{ lookup('ansible.builtin.template', root_dir + '/templates/nmconnection.j2') }}"
+
+    - name: Create BMC credentials Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ inventory_hostname }}-bmc-credentials"
+            namespace: "{{ metal3_namespace }}"
+          type: Opaque
+          stringData:
+            username: "{{ bmc_user }}"
+            password: "{{ bmc_password }}"
+      delegate_to: localhost
+
+    - name: Create userData Secret (ignition — hostname + static IP)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ inventory_hostname }}-userdata"
+            namespace: "{{ metal3_namespace }}"
+          type: Opaque
+          stringData:
+            userData: |
+              {
+                "ignition": { "version": "3.3.0" },
+                "storage": {
+                  "files": [
+                    {
+                      "path": "/etc/hostname",
+                      "contents": { "source": "data:,{{ node_hostname }}" },
+                      "mode": 420,
+                      "overwrite": true
+                    },
+                    {
+                      "path": "/etc/NetworkManager/system-connections/{{ node_interface }}.nmconnection",
+                      "contents": {
+                        "source": "data:text/plain;charset=utf-8,{{ nmconnection_content | urlencode }}"
+                      },
+                      "mode": 384,
+                      "overwrite": true
+                    }
+                  ]
+                }
+              }
+      delegate_to: localhost
+
+    - name: Apply BareMetalHost CR
+      kubernetes.core.k8s:
+        state: present
+        template: "{{ root_dir }}/metal3/baremetalhost.j2"
+      delegate_to: localhost

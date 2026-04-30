@@ -1,0 +1,18 @@
+apiVersion: metal3.io/v1alpha1
+kind: BareMetalHost
+metadata:
+  name: {{ inventory_hostname }}
+  namespace: {{ metal3_namespace }}
+spec:
+  online: true
+  bootMACAddress: "{{ node_mac }}"
+  bmc:
+    address: "redfish-virtualmedia://{{ bmc_ip }}/redfish/v1/Systems/{{ bmc_system_id }}"
+    credentialsName: {{ inventory_hostname }}-bmc-credentials
+  image:
+    url: "{{ eib_image_http_url }}"
+    checksum: "{{ eib_image_checksum }}"
+    checksumType: "{{ eib_image_checksum_type }}"
+  userData:
+    name: {{ inventory_hostname }}-userdata
+    namespace: {{ metal3_namespace }}
