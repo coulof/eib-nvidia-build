@@ -9,10 +9,19 @@ spec:
   bmc:
     address: "redfish-virtualmedia://{{ bmc_ip }}/redfish/v1/Systems/{{ bmc_system_id }}"
     credentialsName: {{ inventory_hostname }}-bmc-credentials
+  # Static IP for the IPA provisioning ramdisk — eliminates DHCP requirement during provisioning.
+  # Ironic embeds this nmstate config into the virtual media ISO it boots for provisioning.
+  preprovisioningNetworkDataName: {{ inventory_hostname }}-networkdata
   image:
     url: "{{ eib_image_http_url }}"
     checksum: "{{ eib_image_checksum }}"
     checksumType: "{{ eib_image_checksum_type }}"
+  # Static IP for the deployed OS — written to /mnt/openstack/latest/network_data.json
+  # on the config-2 partition (config drive) created by Ironic on the root disk.
+  networkData:
+    name: {{ inventory_hostname }}-networkdata
+    namespace: {{ metal3_namespace }}
+  # Hostname via ignition (requires EIB image built with ignition, not combustion).
   userData:
     name: {{ inventory_hostname }}-userdata
     namespace: {{ metal3_namespace }}

@@ -1,14 +1,18 @@
 ---
 # Registers bare-metal nodes with Metal3 by creating:
 #   - A BMC credentials Secret
-#   - A userData Secret (ignition config: hostname + NMConnection static IP)
+#   - A networkData Secret (nmstate — static IP for both IPA provisioning phase and deployed OS)
+#   - A userData Secret (ignition — hostname only; network is handled by networkData)
 #   - A BareMetalHost CR
 #
 # Prerequisites:
 #   - Management cluster running (RKE2 + Rancher + MetalLB + Ironic + BMO + CAPM3)
 #   - KUBECONFIG pointing at the management cluster
 #   - ansible-galaxy collection install -r ansible/requirements.yml
-#   - eib_image_http_url and eib_image_checksum set in inventory (or as extra-vars)
+#   - eib_image_http_url and eib_image_checksum set in inventory
+#   - EIB image built as imageType: raw with ignition (not combustion)
+#
+# Ref: https://documentation.suse.com/suse-edge/3.5/html/edge/quickstart-metal3.html#id-configuring-static-ips
 #
 # Usage:
 #   ansible-playbook -i ansible/inventory.yml ansible/playbooks/register-nodes.yml
@@ -21,10 +25,6 @@
     root_dir: "{{ playbook_dir }}/../.."
 
   tasks:
-    - name: Render NMConnection content
-      ansible.builtin.set_fact:
-        nmconnection_content: "{{ lookup('ansible.builtin.template', root_dir + '/templates/nmconnection.j2') }}"
-
     - name: Create BMC credentials Secret
       kubernetes.core.k8s:
         state: present
@@ -40,7 +40,13 @@
             password: "{{ bmc_password }}"
       delegate_to: localhost
 
-    - name: Create userData Secret (ignition — hostname + static IP)
+    - name: Create networkData Secret (nmstate — IPA + deployed OS static IP)
+      kubernetes.core.k8s:
+        state: present
+        template: "{{ root_dir }}/metal3/networkdata-secret.j2"
+      delegate_to: localhost
+
+    - name: Create userData Secret (ignition — hostname only)
       kubernetes.core.k8s:
         state: present
         definition:
@@ -60,14 +66,6 @@
                       "path": "/etc/hostname",
                       "contents": { "source": "data:,{{ node_hostname }}" },
                       "mode": 420,
-                      "overwrite": true
-                    },
-                    {
-                      "path": "/etc/NetworkManager/system-connections/{{ node_interface }}.nmconnection",
-                      "contents": {
-                        "source": "data:text/plain;charset=utf-8,{{ nmconnection_content | urlencode }}"
-                      },
-                      "mode": 384,
                       "overwrite": true
                     }
                   ]

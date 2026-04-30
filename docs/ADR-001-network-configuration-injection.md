@@ -72,15 +72,18 @@ unsuitable for first-boot network configuration.
 `metal3-docs/docs/user-guide/src/bmo/instance_customization.md`,
 `metal3-docs/design/baremetal-operator/bmh_non-bootable_iso.md`)*
 
-**Blocker 2 — DHCP-less mode requires a custom IPA ramdisk.**
-Metal3 does document a DHCP-less provisioning path via `preprovisioningNetworkDataName` and
-Redfish virtual media — static IP config is provided in OpenStack `network_data.json` format and
-embedded in the IPA boot ISO. However, this requires an IPA ramdisk image that includes
-cloud-init, Glean, or simple-init to apply the network data. **The default community IPA ramdisk
-does not include any such tool**, and SUSE Edge does not ship a pre-built DHCP-less IPA image.
-Building a custom IPA ramdisk is out of scope for this project.
-*(Source: `metal3-docs/docs/user-guide/src/bmo/advanced_instance_customization.md`,
-`metal3-docs/design/baremetal-operator/how-ironic-works.md`)*
+**Blocker 2 — Resolved by SUSE Edge `preprovisioningNetworkDataName` + nmstate.**
+SUSE Edge Metal3 documents a DHCP-less provisioning path using `preprovisioningNetworkDataName`
+referencing a Kubernetes Secret in **nmstate format**. When Redfish virtual media boot is used,
+Ironic embeds this nmstate config into the IPA boot ISO; the IPA ramdisk applies it before
+contacting Ironic, eliminating the DHCP requirement entirely. The same Secret is referenced by
+`spec.networkData` to write `/mnt/openstack/latest/network_data.json` on the config drive for
+the deployed OS. **Blocker 2 is therefore resolved for environments using SUSE Edge Metal3 with
+Redfish virtual media.**
+*(Source: https://documentation.suse.com/suse-edge/3.5/html/edge/quickstart-metal3.html#id-configuring-static-ips)*
+
+**Blocker 1 therefore remains the only open blocker:** EIB images must be switched from
+combustion to ignition before Metal3 can be adopted.
 
 ---
 
