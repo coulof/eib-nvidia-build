@@ -56,15 +56,21 @@ management. It is the correct long-term architecture for fleet-scale provisionin
 
 **Why we cannot adopt it today — two hard blockers:**
 
-**Blocker 1 — Combustion vs. ignition config drive mismatch.**
-Metal3 delivers per-node configuration via a *config drive partition* written to the root disk
-during provisioning (`/openstack/latest/user_data`, OpenStack format). This is consumed by
-**ignition**. SL Micro images built by EIB use **combustion** by default — a different first-boot
-mechanism that reads from a block device labeled `COMBUSTION`, not from an OpenStack config drive
-partition. The two are incompatible without reconfiguring the EIB build to emit an ignition-based
-image instead of a combustion-based one.
+**Blocker 1 — Combustion label mismatch with Ironic config drive.**
+Metal3/Ironic creates a config drive partition on the root disk, labeled **`config-2`** (OpenStack
+format), containing user data at `/openstack/latest/user_data`. SL Micro's **combustion** looks
+for a block device labeled **`COMBUSTION`** — it will never find the `config-2` partition. **Ignition**,
+on the other hand, does recognise the OpenStack config drive format and would work. SL Micro
+supports both combustion and ignition, but EIB images use combustion by default. Switching to
+ignition-based first-boot would unblock Metal3, but requires changes to how EIB builds are
+configured.
+
+A `DataImage` CRD exists that can attach a non-bootable ISO as a second virtual media mount —
+however it only activates **after** provisioning completes and requires a reboot, making it
+unsuitable for first-boot network configuration.
 *(Source: `metal3-docs/design/baremetal-operator/host-config-drive.md`,
-`metal3-docs/docs/user-guide/src/bmo/instance_customization.md`)*
+`metal3-docs/docs/user-guide/src/bmo/instance_customization.md`,
+`metal3-docs/design/baremetal-operator/bmh_non-bootable_iso.md`)*
 
 **Blocker 2 — DHCP-less mode requires a custom IPA ramdisk.**
 Metal3 does document a DHCP-less provisioning path via `preprovisioningNetworkDataName` and
@@ -146,4 +152,4 @@ Option B (Metal3) is the correct target architecture. The transition should be t
 2. [x] Ansible playbook using `community.general.redfish_command` for dual virtual media injection
 3. [x] Per-node config managed exclusively through `ansible/inventory.yml`
 4. [ ] Revisit Metal3 when DHCP is available on provisioning network or SUSE Edge ships a DHCP-less IPA
-5. [ ] Evaluate switching EIB build from combustion to ignition to unlock Metal3 config drive compatibility
+5. [ ] Evaluate switching EIB build from combustion to ignition — this would unlock full Metal3 compatibility and eliminate per-node ISO lifecycle entirely (config becomes a Kubernetes Secret)
